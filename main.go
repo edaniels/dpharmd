@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -51,7 +52,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		runAndroidTest(w, r, query)
 		return
 	case testTypeIOS:
-		w.WriteHeader(http.StatusInternalServerError)
+		runIOSTest(w, r, query)
 		return
 	}
 
@@ -114,6 +115,100 @@ func runAndroidTest(w http.ResponseWriter, r *http.Request, query url.Values) {
 	w.Write(result)
 }
 
+func runIOSTest(w http.ResponseWriter, r *http.Request, query url.Values) {
+	testDestination := query.Get("test_destination")
+	if testDestination == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("must specify 'test_destination'"))
+		return
+	}
+
+	testSchemesStr := query.Get("test_schemes")
+	if testSchemesStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("must specify 'test_schemes'"))
+		return
+	}
+	testSchemes := strings.Split(testSchemesStr, ",")
+
+	dir := os.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	sourceDir := RandomAlphaNumericString(5)
+	if err := os.Mkdir(sourceDir, 0755); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	defer os.RemoveAll(sourceDir)
+
+	if err := os.Chdir(filepath.Join(dir, sourceDir)); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	sourceFileName := filepath.Join(dir, sourceDir, "source.tgz")
+	sourceFile, err := os.OpenFile(sourceFileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if os.IsExist(err) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	reader := io.TeeReader(r.Body, sourceFile)
+	if _, err := ioutil.ReadAll(reader); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	sourceFile.Close()
+
+	log.Print("ios: Unpacking source")
+
+	cmd := exec.Command("tar", "xf", sourceFile.Name())
+	result, err := cmd.CombinedOutput()
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		w.Write([]byte("\n"))
+		w.Write(result)
+		return
+	}
+
+	testMu.Lock()
+	defer testMu.Unlock()
+
+	var testFailed bool
+	for _, scheme := range testSchemes {
+		testStartMsg := fmt.Sprintf("ios: Testing scheme %q on destination %q", scheme, testDestination)
+		log.Print(testStartMsg)
+		w.Write([]byte(testStartMsg))
+		w.Write([]byte("\n"))
+		cmd = exec.Command("xcodebuild", "test", "-destination", testDestination, "-scheme", scheme)
+		result, err = cmd.CombinedOutput()
+		if err != nil {
+			testFailed = true
+			w.Write([]byte("!!TEST FAILED!!\n"))
+			w.Write([]byte(err.Error()))
+			w.Write([]byte("\n"))
+			w.Write(result)
+			continue
+		}
+
+		w.Write([]byte("!!TEST PASSED!!\n"))
+		w.Write(result)
+	}
+
+	if !testFailed {
+		w.Write([]byte("!!ALL TESTS PASSED!!\n"))
+	}
+}
+
 const (
 	testTypeAndroid = "android"
 	testTypeIOS     = "ios"
@@ -145,4 +240,3 @@ func randomStringFromAlphabet(alpha []rune, length int) string {
 
 	return buf.String()
 }
-
