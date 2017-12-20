@@ -144,15 +144,16 @@ func runIOSTest(w http.ResponseWriter, r *http.Request, query url.Values) {
 		w.Write([]byte(err.Error()))
 		return
 	}
-	defer os.RemoveAll(sourceDir)
+	sourceDirPath := filepath.Join(dir, sourceDir)
+	defer os.RemoveAll(sourceDirPath)
 
-	if err := os.Chdir(filepath.Join(dir, sourceDir)); err != nil {
+	if err := os.Chdir(sourceDirPath); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
 	}
 
-	sourceFileName := filepath.Join(dir, sourceDir, "source.tgz")
+	sourceFileName := filepath.Join(sourceDirPath, "source.tgz")
 	sourceFile, err := os.OpenFile(sourceFileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if os.IsExist(err) {
 		w.WriteHeader(http.StatusBadRequest)
