@@ -189,7 +189,7 @@ func runIOSTest(w http.ResponseWriter, r *http.Request, query url.Values) {
 		log.Print(testStartMsg)
 		w.Write([]byte(testStartMsg))
 		w.Write([]byte("\n"))
-		cmd = exec.Command("xcodebuild", "test", "-destination", testDestination, "-scheme", scheme)
+		cmd = exec.Command("xcodebuild", "test", "-destination", testDestination, "-scheme", scheme, "-parallelizeTargets")
 		result, err = cmd.CombinedOutput()
 		if err != nil {
 			testFailed = true
